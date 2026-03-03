@@ -1,0 +1,17 @@
+{
+  "name": "regex-tester",
+  "version": "1.0.0",
+  "description": "Interactive regex playground in your terminal. Live match preview, capture groups, pattern library.",
+  "type": "module",
+  "bin": {
+    "regex-tester": "./index.js",
+    "rxt": "./index.js"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["developer-tools", "cli", "nodejs", "zero-dependencies", "regex", "tui", "testing"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NickCirv/regex-tester"
+  }
+}
