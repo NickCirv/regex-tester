@@ -1,17 +1,32 @@
 {
   "name": "regex-tester",
   "version": "1.0.0",
-  "description": "Interactive regex playground in your terminal. Live match preview, capture groups, pattern library.",
+  "description": "Test, explain, and benchmark regular expressions from the terminal",
   "type": "module",
   "bin": {
     "regex-tester": "./index.js",
-    "rxt": "./index.js"
+    "rgxt": "./index.js"
   },
-  "engines": { "node": ">=18" },
-  "keywords": ["developer-tools", "cli", "nodejs", "zero-dependencies", "regex", "tui", "testing"],
+  "engines": {
+    "node": ">=18"
+  },
   "license": "MIT",
+  "keywords": [
+    "developer-tools",
+    "cli",
+    "nodejs",
+    "zero-dependencies",
+    "regex",
+    "testing",
+    "pattern-matching",
+    "developer"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/NickCirv/regex-tester"
+    "url": "https://github.com/NickCirv/regex-tester.git"
+  },
+  "homepage": "https://github.com/NickCirv/regex-tester#readme",
+  "bugs": {
+    "url": "https://github.com/NickCirv/regex-tester/issues"
   }
 }

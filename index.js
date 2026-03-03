@@ -1,428 +1,641 @@
 #!/usr/bin/env node
-// regex-tester — interactive regex playground in your terminal
-// Zero dependencies · Node 18+
+// regex-tester — test, explain, and benchmark regular expressions from the terminal
+// Zero dependencies · Node 18+ · ES Modules
 
-const { argv, stdout, stdin, exit } = process;
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
 
-// ── ANSI helpers ─────────────────────────────────────────────────────────────
-const ESC = '\x1b[';
-const ansi = {
-  reset:     '\x1b[0m',
-  bold:      '\x1b[1m',
-  dim:       '\x1b[2m',
-  red:       '\x1b[31m',
-  green:     '\x1b[32m',
-  yellow:    '\x1b[33m',
-  blue:      '\x1b[34m',
-  magenta:   '\x1b[35m',
-  cyan:      '\x1b[36m',
-  white:     '\x1b[37m',
-  gray:      '\x1b[90m',
-  bRed:      '\x1b[91m',
-  bGreen:    '\x1b[92m',
-  bYellow:   '\x1b[93m',
-  bBlue:     '\x1b[94m',
-  bMagenta:  '\x1b[95m',
-  bCyan:     '\x1b[96m',
-  bWhite:    '\x1b[97m',
-  bgBlue:    '\x1b[44m',
-  bgMagenta: '\x1b[45m',
-  bgCyan:    '\x1b[46m',
-  clear:     '\x1b[2J\x1b[H',
-  hideCursor:'\x1b[?25l',
-  showCursor:'\x1b[?25h',
-  moveTo: (r, c) => `${ESC}${r};${c}H`,
-  clearLine: `${ESC}2K`,
+// ── ANSI helpers ──────────────────────────────────────────────────────────────
+const A = {
+  reset:   '\x1b[0m',
+  bold:    '\x1b[1m',
+  dim:     '\x1b[2m',
+  red:     '\x1b[31m',
+  green:   '\x1b[32m',
+  yellow:  '\x1b[33m',
+  cyan:    '\x1b[36m',
+  white:   '\x1b[37m',
+  gray:    '\x1b[90m',
+  bRed:    '\x1b[91m',
+  bGreen:  '\x1b[92m',
+  bYellow: '\x1b[93m',
+  bBlue:   '\x1b[94m',
+  bMagenta:'\x1b[95m',
+  bCyan:   '\x1b[96m',
+  bgCyan:  '\x1b[46m',
+  bgGreen: '\x1b[42m',
 };
 
-const write = (s) => stdout.write(s);
-const col = (code, s) => `${code}${s}${ansi.reset}`;
+const c = (code, s) => `${code}${s}${A.reset}`;
+const bold    = (s) => c(A.bold, s);
+const cyan    = (s) => c(A.cyan, s);
+const green   = (s) => c(A.bGreen, s);
+const yellow  = (s) => c(A.bYellow, s);
+const magenta = (s) => c(A.bMagenta, s);
+const gray    = (s) => c(A.gray, s);
+const red     = (s) => c(A.bRed, s);
+const dim     = (s) => c(A.dim, s);
 
-// ── Box drawing ───────────────────────────────────────────────────────────────
-function box(title, lines, width, focused = false) {
-  const titleColor  = focused ? ansi.bCyan : ansi.gray;
-  const borderColor = focused ? ansi.cyan  : ansi.dim;
-  const titleStr    = `─ ${title} `;
-  const top    = `${borderColor}┌${titleColor}${ansi.bold}${titleStr}${ansi.reset}${borderColor}${'─'.repeat(Math.max(0, width - titleStr.length - 2))}┐${ansi.reset}`;
-  const bottom = `${borderColor}└${'─'.repeat(width - 2)}┘${ansi.reset}`;
-  const out = [top];
-  for (const line of lines) {
-    const pad = Math.max(0, width - 4 - visibleLen(line));
-    out.push(`${borderColor}│${ansi.reset} ${line}${' '.repeat(pad)} ${borderColor}│${ansi.reset}`);
-  }
-  out.push(bottom);
-  return out;
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
-function stripAnsi(s) { return s.replace(/\x1b\[[0-9;]*m/g, ''); }
-function visibleLen(s) { return stripAnsi(s).length; }
-
-function truncate(s, maxLen) {
-  let len = 0; let result = ''; let inEsc = false;
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === '\x1b') inEsc = true;
-    if (inEsc) { result += s[i]; if (s[i] === 'm') inEsc = false; continue; }
-    if (len >= maxLen) break;
-    result += s[i]; len++;
-  }
-  return result + ansi.reset;
-}
-
-// ── Pattern presets ───────────────────────────────────────────────────────────
-const PRESETS = [
-  { name: 'Email',      pattern: '([\\w.+-]+)@([\\w-]+)\\.([\\w.]+)',   flags: 'gi', description: 'Match email addresses' },
-  { name: 'URL',        pattern: 'https?:\\/\\/[\\w\\-._~:/?#\\[\\]@!$&\'()*+,;=%]+', flags: 'gi', description: 'Match HTTP/HTTPS URLs' },
-  { name: 'IPv4',       pattern: '(\\d{1,3}\\.){3}\\d{1,3}',            flags: 'g',  description: 'Match IPv4 addresses' },
-  { name: 'Date',       pattern: '(\\d{4})-(\\d{2})-(\\d{2})',           flags: 'g',  description: 'Match YYYY-MM-DD dates' },
-  { name: 'UUID',       pattern: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', flags: 'gi', description: 'Match UUIDs' },
-  { name: 'Phone (US)', pattern: '(\\+1[-.\\s]?)?\\(?([0-9]{3})\\)?[-.\\s]?([0-9]{3})[-.\\s]?([0-9]{4})', flags: 'g', description: 'Match US phone numbers' },
-  { name: 'Hex color',  pattern: '#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\\b', flags: 'g',  description: 'Match CSS hex colors' },
-  { name: 'HTML tag',   pattern: '<([a-z][a-z0-9]*)\\b[^>]*>(.*?)<\\/\\1>', flags: 'gis', description: 'Match HTML element pairs' },
-  { name: 'Word',       pattern: '\\b\\w+\\b',                           flags: 'g',  description: 'Match individual words' },
-  { name: 'Number',     pattern: '-?\\d+(\\.\\d+)?',                    flags: 'g',  description: 'Match integers and decimals' },
-];
-
-// ── Regex engine ──────────────────────────────────────────────────────────────
-function parsePatternInput(raw) {
-  const m = raw.match(/^\/(.*)\/([gimsuy]*)$/s);
-  if (m) return { src: m[1], flags: m[2] };
-  return { src: raw, flags: '' };
-}
-
-function compileRegex(src, flags) {
-  const allFlags = [...new Set(('d' + flags).split(''))].join('');
-  return new RegExp(src, allFlags);
-}
-
-function getMatches(regex, str) {
-  if (regex.flags.includes('g')) return [...str.matchAll(regex)];
-  const m = regex.exec(str);
-  return m ? [m] : [];
-}
-
-// ── Highlight matches in test string ─────────────────────────────────────────
+// ── Highlight matched portions of a string ───────────────────────────────────
 function highlightMatches(str, matches) {
   if (!matches.length) return str;
+
+  // Build non-overlapping ranges from match indices
   const ranges = [];
   for (const m of matches) {
-    if (m.indices) ranges.push(m.indices[0]);
+    if (m.indices) {
+      ranges.push([m.indices[0][0], m.indices[0][1]]);
+    }
   }
   ranges.sort((a, b) => a[0] - b[0]);
-  let result = ''; let pos = 0;
+
+  let result = '';
+  let pos = 0;
   for (const [start, end] of ranges) {
     if (start < pos) continue;
     result += str.slice(pos, start);
-    result += `${ansi.bgCyan}${ansi.bold}${ansi.white}${str.slice(start, end)}${ansi.reset}`;
+    result += `${A.bgCyan}${A.bold}${A.white}${str.slice(start, end)}${A.reset}`;
     pos = end;
   }
   result += str.slice(pos);
   return result;
 }
 
-// ── Explain regex in English ──────────────────────────────────────────────────
+// ── Regex engine ──────────────────────────────────────────────────────────────
+function buildRegex(pattern, flags) {
+  // Always include 'd' flag for indices support (Node 18+)
+  const flagSet = new Set(('d' + flags).split(''));
+  const finalFlags = [...flagSet].join('');
+  return new RegExp(pattern, finalFlags);
+}
+
+function getMatches(regex, str) {
+  if (regex.flags.includes('g')) {
+    return [...str.matchAll(regex)];
+  }
+  const m = regex.exec(str);
+  return m ? [m] : [];
+}
+
+// ── Plain-English regex explainer ─────────────────────────────────────────────
 function explainRegex(src) {
-  const tokens = [];
+  const parts = [];
   let i = 0;
+
   while (i < src.length) {
     const ch = src[i];
+
+    // Escape sequences
     if (ch === '\\' && i + 1 < src.length) {
       const next = src[i + 1];
-      const map = { d:'digit', D:'non-digit', w:'word char', W:'non-word char',
-                    s:'whitespace', S:'non-whitespace', b:'word boundary',
-                    B:'non-word boundary', n:'newline', t:'tab', r:'carriage return' };
-      tokens.push(map[next] ? `[${map[next]}]` : `literal "${next}"`);
+      const escMap = {
+        d: 'a digit (0-9)',
+        D: 'a non-digit',
+        w: 'a word character (a-z, A-Z, 0-9, _)',
+        W: 'a non-word character',
+        s: 'whitespace',
+        S: 'a non-whitespace character',
+        b: 'a word boundary',
+        B: 'a non-word boundary',
+        n: 'a newline',
+        t: 'a tab',
+        r: 'a carriage return',
+        f: 'a form feed',
+        v: 'a vertical tab',
+        0: 'a null byte',
+      };
+      if (escMap[next]) parts.push(escMap[next]);
+      else parts.push(`the literal character "${next}"`);
       i += 2;
-    } else if (ch === '.') { tokens.push('[any char]'); i++; }
-    else if (ch === '^') { tokens.push('[start]'); i++; }
-    else if (ch === '$') { tokens.push('[end]'); i++; }
-    else if (ch === '*') { tokens.push('[0 or more]'); i++; }
-    else if (ch === '+') { tokens.push('[1 or more]'); i++; }
-    else if (ch === '?') { tokens.push('[optional]'); i++; }
-    else if (ch === '{') {
-      const end = src.indexOf('}', i);
-      if (end !== -1) { tokens.push(`[repeat ${src.slice(i, end + 1)}]`); i = end + 1; }
-      else { tokens.push(ch); i++; }
-    } else if (ch === '[') {
-      const end = src.indexOf(']', i);
-      if (end !== -1) { tokens.push(`[char class ${src.slice(i, end + 1)}]`); i = end + 1; }
-      else { tokens.push(ch); i++; }
-    } else if (ch === '(') { tokens.push('[group start]'); i++; }
-    else if (ch === ')') { tokens.push('[group end]'); i++; }
-    else if (ch === '|') { tokens.push('[or]'); i++; }
-    else { tokens.push(`"${ch}"`); i++; }
+      continue;
+    }
+
+    // Character classes
+    if (ch === '[') {
+      const closeIdx = src.indexOf(']', i + 1);
+      if (closeIdx !== -1) {
+        const inner = src.slice(i + 1, closeIdx);
+        const neg = inner.startsWith('^');
+        const content = neg ? inner.slice(1) : inner;
+        parts.push(`${neg ? 'any character NOT in' : 'any character in'} [${content}]`);
+        i = closeIdx + 1;
+
+        // Check for quantifier after class
+        const q = parseQuantifier(src, i);
+        if (q) { parts[parts.length - 1] += ' ' + q.desc; i = q.end; }
+        continue;
+      }
+    }
+
+    // Groups
+    if (ch === '(') {
+      let groupType = 'a capturing group';
+      let skip = 1;
+      if (src.slice(i + 1, i + 3) === '?:') { groupType = 'a non-capturing group'; skip = 3; }
+      else if (src.slice(i + 1, i + 3) === '?=') { groupType = 'a lookahead assertion'; skip = 3; }
+      else if (src.slice(i + 1, i + 3) === '?!') { groupType = 'a negative lookahead'; skip = 3; }
+      else if (src.slice(i + 1, i + 4) === '?<=') { groupType = 'a lookbehind assertion'; skip = 4; }
+      else if (src.slice(i + 1, i + 4) === '?<!') { groupType = 'a negative lookbehind'; skip = 4; }
+      else if (src[i + 1] === '?') {
+        // Named group: (?<name>...)
+        const namedMatch = src.slice(i).match(/^\(\?<(\w+)>/);
+        if (namedMatch) { groupType = `a named capturing group "${namedMatch[1]}"`; skip = namedMatch[0].length; }
+      }
+      parts.push(`[START of ${groupType}]`);
+      i += skip;
+      continue;
+    }
+
+    if (ch === ')') { parts.push('[END of group]'); i++; continue; }
+
+    // Quantifiers on standalone tokens
+    if (ch === '.') {
+      let desc = 'any character (except newline)';
+      i++;
+      const q = parseQuantifier(src, i);
+      if (q) { desc += ' ' + q.desc; i = q.end; }
+      parts.push(desc);
+      continue;
+    }
+
+    if (ch === '^') { parts.push('start of string/line'); i++; continue; }
+    if (ch === '$') { parts.push('end of string/line'); i++; continue; }
+    if (ch === '|') { parts.push('OR'); i++; continue; }
+
+    if (ch === '*' || ch === '+' || ch === '?') {
+      const qMap = { '*': '(0 or more times)', '+': '(1 or more times)', '?': '(optionally)' };
+      // Standalone quantifier — applies to previous token
+      if (parts.length) parts[parts.length - 1] += ' ' + qMap[ch];
+      i++;
+      // Lazy modifier
+      if (src[i] === '?') { if (parts.length) parts[parts.length - 1] += ' [lazy]'; i++; }
+      continue;
+    }
+
+    if (ch === '{') {
+      const closeIdx = src.indexOf('}', i);
+      if (closeIdx !== -1) {
+        const inner = src.slice(i + 1, closeIdx);
+        const [min, max] = inner.split(',');
+        let desc = '';
+        if (max === undefined) desc = `exactly ${min} times`;
+        else if (max === '') desc = `at least ${min} times`;
+        else desc = `between ${min} and ${max} times`;
+        if (parts.length) parts[parts.length - 1] += ` (${desc})`;
+        i = closeIdx + 1;
+        if (src[i] === '?') { if (parts.length) parts[parts.length - 1] += ' [lazy]'; i++; }
+        continue;
+      }
+    }
+
+    // Literal character
+    if (ch.charCodeAt(0) >= 32) {
+      let desc = `the literal character "${ch}"`;
+      i++;
+      const q = parseQuantifier(src, i);
+      if (q) { desc += ' ' + q.desc; i = q.end; }
+      parts.push(desc);
+      continue;
+    }
+
+    i++;
   }
-  return tokens.join(' ');
+
+  return parts;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ONE-SHOT MODE
-// ══════════════════════════════════════════════════════════════════════════════
-function oneshotMode(args) {
-  const patternArg = args[0];
-  const testStr    = args[1] ?? '';
-  const explain    = args.includes('--explain');
-  const { src, flags } = parsePatternInput(patternArg);
+function parseQuantifier(src, i) {
+  const ch = src[i];
+  if (ch === '*') return { desc: '(0 or more times)', end: i + 1 };
+  if (ch === '+') return { desc: '(1 or more times)', end: i + 1 };
+  if (ch === '?') return { desc: '(optionally)',      end: i + 1 };
+  if (ch === '{') {
+    const closeIdx = src.indexOf('}', i);
+    if (closeIdx !== -1) {
+      const inner = src.slice(i + 1, closeIdx);
+      const [min, max] = inner.split(',');
+      let desc = '';
+      if (max === undefined) desc = `(exactly ${min} times)`;
+      else if (max === '') desc = `(at least ${min} times)`;
+      else desc = `(between ${min} and ${max} times)`;
+      return { desc, end: closeIdx + 1 };
+    }
+  }
+  return null;
+}
 
-  let regex;
-  try { regex = compileRegex(src, flags); }
-  catch (e) { console.error(`Invalid regex: ${e.message}`); exit(1); }
+// ── Format match result for display ──────────────────────────────────────────
+function formatMatchResult(m, idx, pattern) {
+  const [start, end] = m.indices ? m.indices[0] : ['?', '?'];
+  const lines = [];
+  lines.push(`  ${bold(cyan(`Match ${idx + 1}:`))} ${yellow(`"${m[0]}"`)}`);
+  lines.push(`    ${gray('Position:')} ${start}..${end}  ${gray('Length:')} ${m[0].length}`);
 
-  if (explain) {
-    console.log(`\n${ansi.bold}Pattern:${ansi.reset} /${src}/${flags}`);
-    console.log(`${ansi.bold}Explanation:${ansi.reset} ${explainRegex(src)}\n`);
+  // Named groups
+  if (m.groups && Object.keys(m.groups).length) {
+    lines.push(`    ${gray('Named groups:')}`);
+    for (const [name, val] of Object.entries(m.groups)) {
+      if (val !== undefined) {
+        lines.push(`      ${magenta(name)}: ${yellow(`"${val}"`)}`);
+      }
+    }
   }
 
-  const matches = getMatches(regex, testStr);
-
-  if (!matches.length) {
-    console.log(`${ansi.yellow}No matches${ansi.reset} for /${src}/${flags} in "${testStr}"`);
-    exit(0);
-  }
-
-  console.log(`\n${col(ansi.bGreen, `${matches.length} match${matches.length === 1 ? '' : 'es'}`)} for ${col(ansi.cyan, `/${src}/${flags}`)}\n`);
-
-  matches.forEach((m, idx) => {
-    const groups = m.slice(1);
-    const [start, end] = m.indices?.[0] ?? ['?', '?'];
-    console.log(`  ${col(ansi.bold + ansi.bWhite, `${idx + 1}:`)} ${col(ansi.bYellow, `"${m[0]}"`)}  ${col(ansi.gray, `@[${start}..${end}]`)}`);
-    groups.forEach((g, gi) => {
+  // Numbered groups
+  const numbered = m.slice(1).filter((g, idx) => {
+    // Skip if already covered by a named group value
+    return g !== undefined;
+  });
+  if (numbered.length) {
+    lines.push(`    ${gray('Capture groups:')}`);
+    m.slice(1).forEach((g, gi) => {
       if (g !== undefined) {
-        const [gs, ge] = m.indices?.[gi + 1] ?? ['?', '?'];
-        console.log(`     ${col(ansi.gray, `Group ${gi + 1}:`)} ${col(ansi.bMagenta, `"${g}"`)}  ${col(ansi.gray, `@[${gs}..${ge}]`)}`);
+        const [gs, ge] = m.indices && m.indices[gi + 1] ? m.indices[gi + 1] : ['?', '?'];
+        lines.push(`      ${gray(`Group ${gi + 1}:`)} ${magenta(`"${g}"`)}`);
       }
     });
+  }
+
+  return lines;
+}
+
+// ── Serialize match to plain object for JSON export ───────────────────────────
+function serializeMatch(m, inputStr) {
+  const [start, end] = m.indices ? m.indices[0] : [null, null];
+  const groups = {};
+  m.slice(1).forEach((g, gi) => {
+    groups[gi + 1] = g ?? null;
   });
-  console.log();
-  exit(0);
+  const namedGroups = {};
+  if (m.groups) Object.assign(namedGroups, m.groups);
+
+  return {
+    match: m[0],
+    start,
+    end,
+    length: m[0].length,
+    groups,
+    namedGroups,
+  };
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// INTERACTIVE TUI
-// ══════════════════════════════════════════════════════════════════════════════
-const STATE = {
-  pattern: '', testStr: '',
-  flags: { g: true, i: false, m: false, s: false },
-  focus: 'pattern',
-  mode: 'normal',   // 'normal' | 'presets' | 'help' | 'explain'
-  presetIdx: 0,
-  error: '', matches: [],
-  dirty: true,
-};
+// ── Help text ─────────────────────────────────────────────────────────────────
+function printHelp() {
+  const usage = `
+${bold(cyan('regex-tester'))} ${gray('v1.0.0')} — Test, explain, and benchmark regular expressions
 
-function flagString() {
-  return Object.entries(STATE.flags).filter(([, v]) => v).map(([k]) => k).join('');
+${bold('USAGE')}
+  ${cyan('regex-tester')} <pattern> [strings...] [options]
+  ${cyan('rgxt')}         <pattern> [strings...] [options]
+
+${bold('ARGUMENTS')}
+  ${yellow('pattern')}          Regular expression pattern (without slashes)
+  ${yellow('strings...')}       One or more test strings (or use --file / stdin)
+
+${bold('OPTIONS')}
+  ${cyan('--flags')} <gimsud>   Regex flags: g=global i=ignoreCase m=multiline
+                       s=dotAll u=unicode d=indices (default: g)
+  ${cyan('--replace')} <str>    Replace matches with substitution string
+                       Supports $1, $2... and $<name> for capture groups
+  ${cyan('--file')} <path>      Test against each line of a file
+  ${cyan('--benchmark')} [n]    Benchmark over N iterations (default: 10000)
+  ${cyan('--explain')}          Describe what the pattern does in plain English
+  ${cyan('--json')}             Output results as JSON
+  ${cyan('--count')}            Show only total match count
+  ${cyan('--no-color')}         Disable ANSI color output
+  ${cyan('--help')}             Show this help message
+
+${bold('EXAMPLES')}
+  ${gray('# Test a pattern against strings')}
+  regex-tester "\\d+" "abc123" "xyz456"
+
+  ${gray('# Global match with flags')}
+  rgxt "(\\w+)@(\\w+)" "user@host admin@server" --flags gi
+
+  ${gray('# Replace mode')}
+  regex-tester "(\\w+)@(\\w+\\.\\w+)" "hi user@example.com" --replace "[email: $1]"
+
+  ${gray('# Test against a file (one line per test)')}
+  regex-tester "^\\d{4}-\\d{2}-\\d{2}$" --file dates.txt
+
+  ${gray('# Stdin')}
+  echo "foo bar baz" | regex-tester "\\b\\w{3}\\b"
+
+  ${gray('# Explain a pattern')}
+  regex-tester "([\\w.]+)@([\\w.]+)" --explain
+
+  ${gray('# Benchmark')}
+  regex-tester "\\b\\w+\\b" "hello world" --benchmark 50000
+
+  ${gray('# JSON export')}
+  regex-tester "(\\w+)@(\\w+)" "user@example.com" --json
+`;
+  process.stdout.write(usage + '\n');
 }
 
-function recompute() {
-  STATE.error = ''; STATE.matches = [];
-  if (!STATE.pattern) return;
-  try {
-    const regex = compileRegex(STATE.pattern, flagString());
-    STATE.matches = getMatches(regex, STATE.testStr);
-  } catch (e) { STATE.error = e.message; }
-}
-
-// ── Render ────────────────────────────────────────────────────────────────────
-function render() {
-  const W = stdout.columns || 80;
-  const lines = [];
-
-  if      (STATE.mode === 'presets') renderPresets(lines, W);
-  else if (STATE.mode === 'help')    renderHelp(lines, W);
-  else if (STATE.mode === 'explain') renderExplain(lines, W);
-  else                               renderMain(lines, W);
-
-  write(ansi.clear + ansi.hideCursor + lines.join('\n'));
-}
-
-function renderMain(lines, W) {
-  lines.push(`${ansi.bold}${ansi.bCyan} regex-tester${ansi.reset}  ${ansi.gray}Tab:switch · p:presets · ?:explain · g/i/m/s:flags · Ctrl+C:quit${ansi.reset}`);
-  lines.push('');
-
-  // Flags
-  const flagRow = Object.entries(STATE.flags).map(([k, v]) => {
-    const label = { g:'global', i:'ignoreCase', m:'multiline', s:'dotAll' }[k];
-    return (v ? col(ansi.bGreen + ansi.bold, `[${k}]`) : col(ansi.gray, `[${k}]`)) + ' ' + col(ansi.gray, label);
-  }).join('  ');
-  lines.push(`${ansi.gray}Flags:${ansi.reset}  ${flagRow}`);
-  lines.push('');
-
-  // Pattern box
-  const patternDisplay = STATE.pattern
-    ? col(ansi.bYellow, `/${STATE.pattern}/${flagString()}`)
-    : col(ansi.gray, '(type a pattern)');
-  const patBoxLines = [truncate(patternDisplay, W - 6)];
-  if (STATE.error) patBoxLines.push(truncate(col(ansi.bRed, `! ${STATE.error}`), W - 6));
-  box('Pattern', patBoxLines, W, STATE.focus === 'pattern').forEach(l => lines.push(l));
-  lines.push('');
-
-  // Test string box
-  const testDisplay = STATE.testStr
-    ? highlightMatches(STATE.testStr, STATE.matches)
-    : col(ansi.gray, '(type a test string)');
-  box('Test String', [truncate(testDisplay, W - 6)], W, STATE.focus === 'testStr').forEach(l => lines.push(l));
-  lines.push('');
-
-  // Matches box
-  const mc = STATE.matches.length;
-  const matchTitle = mc
-    ? col(ansi.bGreen, `Matches (${mc})`)
-    : STATE.error ? col(ansi.bRed, 'Matches (error)') : col(ansi.gray, 'Matches (0)');
-
-  const matchLines = [];
-  if (!STATE.pattern) {
-    matchLines.push(col(ansi.gray, 'Enter a pattern above to see matches'));
-  } else if (STATE.error) {
-    matchLines.push(col(ansi.bRed, 'Fix the pattern error first'));
-  } else if (!mc) {
-    matchLines.push(col(ansi.yellow, 'No matches found'));
-  } else {
-    let shown = 0;
-    for (let idx = 0; idx < mc; idx++) {
-      const m = STATE.matches[idx];
-      const [s, e] = m.indices?.[0] ?? ['?', '?'];
-      matchLines.push(truncate(`${col(ansi.bold, `${idx + 1}:`)} ${col(ansi.bYellow, `"${m[0]}"`)}  ${col(ansi.gray, `@[${s}..${e}]`)}`, W - 6));
-      shown++;
-      m.slice(1).forEach((g, gi) => {
-        if (g !== undefined) {
-          const [gs, ge] = m.indices?.[gi + 1] ?? ['?', '?'];
-          matchLines.push(truncate(`   ${col(ansi.gray, `Group ${gi + 1}:`)} ${col(ansi.bMagenta, `"${g}"`)}  ${col(ansi.gray, `@[${gs}..${ge}]`)}`, W - 6));
-          shown++;
-        }
-      });
-      if (shown > 12) { matchLines.push(col(ansi.gray, `  ... and ${mc - idx - 1} more match${mc - idx - 1 === 1 ? '' : 'es'}`)); break; }
-    }
-  }
-  box(matchTitle, matchLines, W, false).forEach(l => lines.push(l));
-  lines.push('');
-  lines.push(`${ansi.gray}Active: ${STATE.focus === 'pattern' ? 'PATTERN' : 'TEST STRING'} · backspace:delete · Tab:switch${ansi.reset}`);
-}
-
-function renderPresets(lines, W) {
-  lines.push(`${ansi.bold}${ansi.bCyan} Pattern Presets${ansi.reset}  ${ansi.gray}Up/Down:navigate · Enter:select · Esc:cancel${ansi.reset}`);
-  lines.push('');
-  PRESETS.forEach((p, i) => {
-    const sel = i === STATE.presetIdx;
-    const marker  = sel ? col(ansi.bCyan + ansi.bold, '> ') : '  ';
-    const name    = sel ? col(ansi.bWhite + ansi.bold, p.name.padEnd(12)) : col(ansi.white, p.name.padEnd(12));
-    const pattern = truncate(sel ? col(ansi.bYellow, `/${p.pattern}/${p.flags}`) : col(ansi.gray, `/${p.pattern}/${p.flags}`), Math.floor(W / 2) - 4);
-    const desc    = truncate(col(ansi.gray, p.description), Math.floor(W / 2) - 4);
-    lines.push(`${marker}${name}  ${pattern}  ${desc}`);
-  });
-  lines.push('');
-  lines.push(`${ansi.gray}Press Enter to load preset, Esc to cancel${ansi.reset}`);
-}
-
-function renderHelp(lines, W) {
-  const kv = (k, v) => `  ${col(ansi.bCyan + ansi.bold, k.padEnd(20))} ${col(ansi.white, v)}`;
-  lines.push(`${ansi.bold}${ansi.bCyan} Key Bindings${ansi.reset}  ${ansi.gray}Press any key to close${ansi.reset}`);
-  lines.push('');
-  [
-    ['Tab',             'Switch between Pattern / Test String'],
-    ['Backspace',       'Delete last character in active field'],
-    ['g / i / m / s',  'Toggle regex flags (only when pattern field active)'],
-    ['p',               'Open pattern presets library'],
-    ['?',               'Explain current pattern in English'],
-    ['Esc',             'Close overlay / cancel'],
-    ['Ctrl+C',          'Quit'],
-  ].forEach(([k, v]) => lines.push(kv(k, v)));
-}
-
-function renderExplain(lines, W) {
-  lines.push(`${ansi.bold}${ansi.bCyan} Pattern Explanation${ansi.reset}  ${ansi.gray}Press any key to close${ansi.reset}`);
-  lines.push('');
-  if (!STATE.pattern) {
-    lines.push(col(ansi.gray, 'No pattern entered yet.'));
-  } else {
-    lines.push(`${ansi.gray}Pattern:${ansi.reset}  ${col(ansi.bYellow, `/${STATE.pattern}/${flagString()}`)}`);
-    lines.push('');
-    const explanation = explainRegex(STATE.pattern);
-    const words = explanation.split(' ');
-    let cur = '';
-    for (const w of words) {
-      if ((cur + ' ' + w).length > W - 4) { lines.push('  ' + cur); cur = w; }
-      else { cur = cur ? cur + ' ' + w : w; }
-    }
-    if (cur) lines.push('  ' + cur);
-    lines.push('');
-    if (STATE.error) lines.push(col(ansi.bRed, `  Error: ${STATE.error}`));
-    else if (STATE.matches.length) lines.push(col(ansi.bGreen, `  ${STATE.matches.length} match${STATE.matches.length === 1 ? '' : 'es'} on current test string`));
-  }
-}
-
-// ── Input ─────────────────────────────────────────────────────────────────────
-function handleKey(buf) {
-  const str = buf.toString();
-
-  if (str === '\x03' || str === '\x04') { cleanup(); exit(0); }
-
-  // Overlays
-  if (STATE.mode === 'presets') {
-    if (str === '\x1b[A') { STATE.presetIdx = (STATE.presetIdx - 1 + PRESETS.length) % PRESETS.length; }
-    else if (str === '\x1b[B') { STATE.presetIdx = (STATE.presetIdx + 1) % PRESETS.length; }
-    else if (str === '\r' || str === '\n') {
-      const p = PRESETS[STATE.presetIdx];
-      STATE.pattern = p.pattern;
-      for (const k of Object.keys(STATE.flags)) STATE.flags[k] = false;
-      for (const f of p.flags.split('')) if (f in STATE.flags) STATE.flags[f] = true;
-      STATE.mode = 'normal'; recompute();
-    } else { STATE.mode = 'normal'; }
-    STATE.dirty = true; return;
-  }
-
-  if (STATE.mode === 'help' || STATE.mode === 'explain') {
-    STATE.mode = 'normal'; STATE.dirty = true; return;
-  }
-
-  // Normal mode
-  if (str === '\x1b' || str === '\x1b[') { STATE.mode = 'normal'; STATE.dirty = true; return; }
-  if (str === '\t')  { STATE.focus = STATE.focus === 'pattern' ? 'testStr' : 'pattern'; STATE.dirty = true; return; }
-  if (str === 'p')   { STATE.mode = 'presets'; STATE.dirty = true; return; }
-  if (str === '?')   { STATE.mode = 'explain'; STATE.dirty = true; return; }
-
-  // Flag toggles — only when pattern field focused
-  if (STATE.focus === 'pattern' && ['g', 'i', 'm', 's'].includes(str) && STATE.pattern === '') {
-    STATE.flags[str] = !STATE.flags[str]; recompute(); STATE.dirty = true; return;
-  }
-
-  // Backspace
-  if (str === '\x7f' || str === '\b') {
-    if (STATE.focus === 'pattern') STATE.pattern = STATE.pattern.slice(0, -1);
-    else STATE.testStr = STATE.testStr.slice(0, -1);
-    recompute(); STATE.dirty = true; return;
-  }
-
-  // Printable
-  if (str.length === 1 && str.charCodeAt(0) >= 32) {
-    if (STATE.focus === 'pattern') STATE.pattern += str;
-    else STATE.testStr += str;
-    recompute(); STATE.dirty = true; return;
-  }
-}
-
-function cleanup() {
-  write(ansi.showCursor + '\n');
-  if (stdin.isTTY) stdin.setRawMode(false);
-  stdin.pause();
-}
-
-// ── Entry ─────────────────────────────────────────────────────────────────────
-function main() {
+// ── Arg parser ────────────────────────────────────────────────────────────────
+function parseArgs(argv) {
   const args = argv.slice(2);
+  const opts = {
+    pattern:   null,
+    strings:   [],
+    flags:     'g',
+    replace:   null,
+    file:      null,
+    benchmark: false,
+    benchN:    10000,
+    explain:   false,
+    json:      false,
+    count:     false,
+    color:     true,
+    help:      false,
+  };
 
-  if (args.length >= 1 && !args[0].startsWith('--')) { oneshotMode(args); return; }
-  if (args.includes('--explain') && args.length < 2)  {
-    console.error('Usage: regex-tester \'/pattern/\' "string" --explain'); exit(1);
+  let i = 0;
+  while (i < args.length) {
+    const a = args[i];
+    if (a === '--help' || a === '-h') { opts.help = true; i++; continue; }
+    if (a === '--explain')            { opts.explain = true; i++; continue; }
+    if (a === '--json')               { opts.json = true; i++; continue; }
+    if (a === '--count')              { opts.count = true; i++; continue; }
+    if (a === '--no-color')           { opts.color = false; i++; continue; }
+    if (a === '--flags') {
+      opts.flags = args[++i] ?? '';
+      i++; continue;
+    }
+    if (a === '--replace') {
+      opts.replace = args[++i] ?? '';
+      i++; continue;
+    }
+    if (a === '--file') {
+      opts.file = args[++i] ?? null;
+      i++; continue;
+    }
+    if (a === '--benchmark') {
+      opts.benchmark = true;
+      const next = args[i + 1];
+      if (next && /^\d+$/.test(next)) { opts.benchN = parseInt(next, 10); i++; }
+      i++; continue;
+    }
+    // Positional: first is pattern, rest are test strings
+    if (!opts.pattern) { opts.pattern = a; i++; continue; }
+    opts.strings.push(a);
+    i++;
   }
 
-  if (!stdin.isTTY) { console.error('regex-tester requires an interactive terminal.'); exit(1); }
-
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdin.on('data', (buf) => { handleKey(buf); if (STATE.dirty) { render(); STATE.dirty = false; } });
-  stdout.on('resize', () => render());
-
-  recompute(); render();
+  return opts;
 }
 
-main();
+// ── Read lines from file ──────────────────────────────────────────────────────
+async function readFileLines(filePath) {
+  const lines = [];
+  const rl = createInterface({
+    input: createReadStream(filePath),
+    crlfDelay: Infinity,
+  });
+  for await (const line of rl) {
+    if (line.trim()) lines.push(line);
+  }
+  return lines;
+}
+
+// ── Read stdin ────────────────────────────────────────────────────────────────
+async function readStdin() {
+  if (process.stdin.isTTY) return [];
+  const lines = [];
+  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (line.trim()) lines.push(line);
+  }
+  return lines;
+}
+
+// ── Main processing logic ─────────────────────────────────────────────────────
+async function run() {
+  const opts = parseArgs(process.argv);
+
+  // Disable color if requested or not a TTY
+  const useColor = opts.color && process.stdout.isTTY;
+  if (!useColor) {
+    // Strip all color functions
+    for (const key of Object.keys(A)) A[key] = '';
+    ['c', 'bold', 'cyan', 'green', 'yellow', 'magenta', 'gray', 'red', 'dim'].forEach(() => {});
+  }
+
+  if (opts.help) { printHelp(); process.exit(0); }
+
+  if (!opts.pattern) {
+    process.stderr.write(red('Error: pattern is required.\n'));
+    process.stderr.write(`Run ${cyan('regex-tester --help')} for usage.\n`);
+    process.exit(1);
+  }
+
+  // Build regex
+  let regex;
+  try {
+    regex = buildRegex(opts.pattern, opts.flags);
+  } catch (err) {
+    process.stderr.write(red(`Invalid regex: ${err.message}\n`));
+    process.exit(1);
+  }
+
+  // Gather test strings
+  let inputs = [...opts.strings];
+
+  if (opts.file) {
+    try {
+      const fileLines = await readFileLines(opts.file);
+      inputs = inputs.concat(fileLines);
+    } catch (err) {
+      process.stderr.write(red(`Cannot read file: ${err.message}\n`));
+      process.exit(1);
+    }
+  }
+
+  const stdinLines = await readStdin();
+  inputs = inputs.concat(stdinLines);
+
+  // ── EXPLAIN MODE ──────────────────────────────────────────────────────────
+  if (opts.explain) {
+    const parts = explainRegex(opts.pattern);
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        pattern: opts.pattern,
+        flags: opts.flags,
+        explanation: parts,
+      }, null, 2) + '\n');
+    } else {
+      process.stdout.write('\n');
+      process.stdout.write(bold(`Pattern: `) + cyan(`/${opts.pattern}/${opts.flags}`) + '\n');
+      process.stdout.write(bold('Explanation:\n'));
+      parts.forEach((part, i) => {
+        process.stdout.write(`  ${gray(String(i + 1).padStart(2, ' ') + '.')} ${part}\n`);
+      });
+      process.stdout.write('\n');
+    }
+    if (!inputs.length) process.exit(0);
+  }
+
+  // If no inputs at this point, show help nudge
+  if (!inputs.length) {
+    process.stderr.write(yellow('No input strings provided.\n'));
+    process.stderr.write(`Usage: ${cyan('regex-tester')} <pattern> <string> [--flags gi]\n`);
+    process.exit(1);
+  }
+
+  // ── BENCHMARK MODE ────────────────────────────────────────────────────────
+  if (opts.benchmark) {
+    const n = opts.benchN;
+    const testStr = inputs[0];
+
+    process.stdout.write('\n');
+    process.stdout.write(bold('Benchmark') + `  /${cyan(opts.pattern)}/${opts.flags}\n`);
+    process.stdout.write(`  ${gray('Input:')}    "${testStr.slice(0, 60)}${testStr.length > 60 ? '...' : ''}"\n`);
+    process.stdout.write(`  ${gray('Iterations:')} ${n.toLocaleString()}\n\n`);
+
+    // Warm up
+    for (let k = 0; k < 100; k++) {
+      const r = buildRegex(opts.pattern, opts.flags);
+      getMatches(r, testStr);
+    }
+
+    const start = performance.now();
+    let matchCount = 0;
+    for (let k = 0; k < n; k++) {
+      const r = buildRegex(opts.pattern, opts.flags);
+      const ms = getMatches(r, testStr);
+      matchCount = ms.length;
+    }
+    const elapsed = performance.now() - start;
+    const perOp = elapsed / n;
+    const opsPerSec = Math.round(1000 / perOp);
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        pattern: opts.pattern,
+        flags: opts.flags,
+        iterations: n,
+        totalMs: parseFloat(elapsed.toFixed(3)),
+        perIterationUs: parseFloat((perOp * 1000).toFixed(3)),
+        opsPerSecond: opsPerSec,
+        matchesPerInput: matchCount,
+      }, null, 2) + '\n');
+    } else {
+      process.stdout.write(`  ${green('Total time:')}    ${elapsed.toFixed(2)}ms\n`);
+      process.stdout.write(`  ${green('Per iteration:')} ${(perOp * 1000).toFixed(3)}μs\n`);
+      process.stdout.write(`  ${green('Ops/second:')}    ${opsPerSec.toLocaleString()}\n`);
+      process.stdout.write(`  ${green('Matches/input:')} ${matchCount}\n`);
+      process.stdout.write('\n');
+    }
+    process.exit(0);
+  }
+
+  // ── TEST / REPLACE MODE ───────────────────────────────────────────────────
+  const jsonResults = [];
+  let totalMatches = 0;
+  let totalInputs = inputs.length;
+
+  for (const input of inputs) {
+    const matches = getMatches(regex, input);
+    totalMatches += matches.length;
+
+    if (opts.json) {
+      jsonResults.push({
+        input,
+        matchCount: matches.length,
+        matches: matches.map((m) => serializeMatch(m, input)),
+        ...(opts.replace !== null
+          ? { replaced: input.replace(regex, opts.replace) }
+          : {}),
+      });
+      continue;
+    }
+
+    if (opts.count) continue; // collect counts, print summary later
+
+    // Normal output
+    const multiInput = totalInputs > 1;
+    if (multiInput) {
+      process.stdout.write('\n' + bold('Input: ') + `"${input}"\n`);
+    } else {
+      process.stdout.write('\n');
+    }
+
+    if (opts.replace !== null) {
+      // Replace mode
+      const replaced = input.replace(regex, opts.replace);
+      process.stdout.write(bold('Pattern:  ') + cyan(`/${opts.pattern}/${opts.flags}`) + '\n');
+      process.stdout.write(bold('Input:    ') + `"${input}"\n`);
+      process.stdout.write(bold('Replaced: ') + green(`"${replaced}"`) + '\n');
+      process.stdout.write(gray(`(${matches.length} replacement${matches.length !== 1 ? 's' : ''})\n`));
+      process.stdout.write('\n');
+      continue;
+    }
+
+    if (!matches.length) {
+      process.stdout.write(yellow('No matches') + ` for ${cyan(`/${opts.pattern}/${opts.flags}`)}\n`);
+      if (!multiInput) {
+        process.stdout.write(dim('  Input: ') + `"${input}"\n`);
+      }
+      continue;
+    }
+
+    // Show highlighted string + matches
+    process.stdout.write(
+      bold(green(`${matches.length} match${matches.length !== 1 ? 'es' : ''}`)) +
+      ` for ${cyan(`/${opts.pattern}/${opts.flags}`)}\n`
+    );
+    if (!multiInput) {
+      process.stdout.write(bold('Input: ') + `"${highlightMatches(input, matches)}"\n`);
+    } else {
+      process.stdout.write(`       "${highlightMatches(input, matches)}"\n`);
+    }
+
+    matches.forEach((m, idx) => {
+      const matchLines = formatMatchResult(m, idx, opts.pattern);
+      matchLines.forEach((l) => process.stdout.write(l + '\n'));
+    });
+  }
+
+  // ── OUTPUT ────────────────────────────────────────────────────────────────
+  if (opts.json) {
+    process.stdout.write(JSON.stringify({
+      pattern: opts.pattern,
+      flags: opts.flags,
+      totalInputs,
+      totalMatches,
+      results: jsonResults,
+    }, null, 2) + '\n');
+    process.exit(0);
+  }
+
+  if (opts.count) {
+    process.stdout.write('\n');
+    process.stdout.write(bold('Pattern: ') + cyan(`/${opts.pattern}/${opts.flags}`) + '\n');
+    process.stdout.write(bold('Inputs:  ') + String(totalInputs) + '\n');
+    process.stdout.write(bold('Matches: ') + (totalMatches > 0 ? green(String(totalMatches)) : yellow('0')) + '\n');
+    process.stdout.write('\n');
+    process.exit(0);
+  }
+
+  // Summary line when testing multiple inputs
+  if (totalInputs > 1) {
+    process.stdout.write('\n');
+    process.stdout.write(
+      bold('Summary: ') +
+      green(`${totalMatches} total match${totalMatches !== 1 ? 'es' : ''}`) +
+      ` across ${totalInputs} inputs\n\n`
+    );
+  } else {
+    process.stdout.write('\n');
+  }
+}
+
+run().catch((err) => {
+  process.stderr.write(`Fatal error: ${err.message}\n`);
+  process.exit(1);
+});
