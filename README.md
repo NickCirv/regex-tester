@@ -1,3 +1,5 @@
+![Banner](banner.svg)
+
 # regex-tester
 
 > Test, explain, and benchmark regular expressions from the terminal.
