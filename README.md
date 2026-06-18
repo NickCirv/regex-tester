@@ -1,18 +1,19 @@
-![Banner](banner.svg)
+![regex-tester — test, explain, and benchmark regular expressions from the terminal](assets/banner.png)
 
-# regex-tester
+<div align="center">
 
-> Test, explain, and benchmark regular expressions from the terminal.
+**Test, match, explain, and benchmark regular expressions. Instant feedback in the terminal — no browser, no account, no install.**
 
-Zero dependencies · Node 18+ · ES Modules · Single file
+![license](https://img.shields.io/badge/license-MIT-blue?labelColor=0B0A09)
+![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?labelColor=0B0A09)
+![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?labelColor=0B0A09)
+![modes](https://img.shields.io/badge/modes-match%20·%20explain%20·%20benchmark%20·%20replace-8B92F6?labelColor=0B0A09)
 
-```
-npm install -g regex-tester
-```
+</div>
 
 ---
 
-## Demo
+Regex tools live in a browser, expect you to paste one string at a time, and give you no way to pipe them into a build script. `regex-tester` runs entirely in the terminal: feed it strings, a file, or stdin — get back highlighted matches, exact capture group positions, a plain-English explanation of the pattern, and ops/second benchmarks. Scriptable via JSON output and exit codes.
 
 ```
 $ rgxt "(\w+)@(\w+\.\w+)" "nick@example.com" "admin@cirvgreen.com"
@@ -35,7 +36,21 @@ Input: "admin@cirvgreen.com"
 Summary: 2 total matches across 2 inputs
 ```
 
----
+## Install
+
+No npm account needed — runs straight from GitHub with zero dependencies:
+
+```bash
+npx github:NickCirv/regex-tester
+```
+
+Or install the short alias globally:
+
+```bash
+npx github:NickCirv/regex-tester --help
+# short alias after global install:
+# rgxt <pattern> [strings...]
+```
 
 ## Usage
 
@@ -44,73 +59,40 @@ regex-tester <pattern> [strings...] [options]
 rgxt         <pattern> [strings...] [options]
 ```
 
-### Arguments
+| Flag | Description |
+|------|-------------|
+| `--flags <gimsud>` | Regex flags: `g`=global `i`=ignoreCase `m`=multiline `s`=dotAll `u`=unicode (default: `g`) |
+| `--replace <str>` | Replace matches; supports `$1`, `$2`, `$<name>` back-references |
+| `--file <path>` | Test against each line of a file |
+| `--benchmark [n]` | Benchmark N iterations (default: 10 000) — reports ops/second and µs/op |
+| `--explain` | Describe the pattern token-by-token in plain English |
+| `--json` | Output results as JSON (scriptable) |
+| `--count` | Print only total match count |
+| `--no-color` | Disable ANSI output |
+| `--help` | Show help |
 
-| Argument    | Description                                      |
-|-------------|--------------------------------------------------|
-| pattern     | Regular expression (without slashes)             |
-| strings..   | One or more test strings (or --file / stdin)     |
+## What it does
 
-### Options
-
-| Flag               | Description                                                         |
-|--------------------|---------------------------------------------------------------------|
-| --flags gimsud     | Regex flags: g=global i=ignoreCase m=multiline s=dotAll u=unicode  |
-| --replace str      | Replace matches; supports $1, $2, $<name> back-references          |
-| --file path        | Test against each line of a file                                    |
-| --benchmark [n]    | Benchmark N iterations (default: 10000)                             |
-| --explain          | Describe the pattern in plain English                               |
-| --json             | Output results as JSON                                              |
-| --count            | Print only total match count                                        |
-| --no-color         | Disable ANSI output                                                 |
-| --help             | Show help                                                           |
-
----
-
-## Examples
-
-### Test a pattern
+### Match with ANSI highlighting
 
 ```bash
-regex-tester "\d+" "abc123def456"
+rgxt "\d+" "abc123def456"
 # 2 matches for /\d+/g
-#   Match 1: "123"  @[3..6]
-#   Match 2: "456"  @[9..12]
-```
-
-### Multiple strings
-
-```bash
-rgxt "\d{4}" "born 1995" "year: 2026" "no digits here"
+#   Match 1: "123"  Position: 3..6  Length: 3
+#   Match 2: "456"  Position: 9..12  Length: 3
 ```
 
 ### Named capture groups
 
 ```bash
 regex-tester "(?<user>\w+)@(?<domain>[\w.]+)" "nick@example.com"
+# Match 1: "nick@example.com"
+#   Named groups:
+#     user:   "nick"
+#     domain: "example.com"
 ```
 
-### Replace mode
-
-```bash
-regex-tester "(\w+)@(\w+\.\w+)" "contact user@example.com" --replace "[email redacted]"
-# Replaced: "contact [email redacted]"
-```
-
-### Test a file
-
-```bash
-regex-tester "^\d{4}-\d{2}-\d{2}$" --file dates.txt --count
-```
-
-### Stdin
-
-```bash
-cat urls.txt | regex-tester "https?://[\w./]+"
-echo "foo bar baz" | rgxt "\b\w{3}\b"
-```
-
-### Explain mode
+### Explain mode — plain-English breakdown
 
 ```bash
 regex-tester "([\w.]+)@([\w.]+)" --explain
@@ -125,6 +107,25 @@ regex-tester "([\w.]+)@([\w.]+)" --explain
 #    7. [END of group]
 ```
 
+### Replace mode
+
+```bash
+regex-tester "(\w+)@(\w+\.\w+)" "contact user@example.com" --replace "[email redacted]"
+# Replaced: "contact [email redacted]"
+# (1 replacement)
+```
+
+### File and stdin
+
+```bash
+# Test each line of a file
+regex-tester "^\d{4}-\d{2}-\d{2}$" --file dates.txt --count
+
+# Pipe from any source
+cat urls.txt | rgxt "https?://[\w./]+"
+echo "foo bar baz" | rgxt "\b\w{3}\b"
+```
+
 ### Benchmark
 
 ```bash
@@ -132,11 +133,11 @@ regex-tester "\b\w+\b" "the quick brown fox" --benchmark 100000
 # Benchmark  /\b\w+\b/g
 #   Iterations:    100,000
 #   Total time:    52.3ms
-#   Per iteration: 0.523us
+#   Per iteration: 0.523μs
 #   Ops/second:    1,912,045
 ```
 
-### JSON output
+### JSON export
 
 ```bash
 regex-tester "(\w+)@(\w+)" "user@example.com" --json
@@ -167,29 +168,14 @@ regex-tester "(\w+)@(\w+)" "user@example.com" --json
 }
 ```
 
----
+## What it is NOT
 
-## Features
-
-- ANSI highlighting of matched portions in terminal output
-- Numbered and named capture groups with exact positions
-- Replace mode with back-reference support ($1, $<name>)
-- File mode — test each line independently
-- Stdin — pipe from any source
-- Benchmark — ops/second and per-iteration microseconds
-- Explain — plain-English breakdown of each pattern token
-- JSON export for scripting and pipelines
-- Count mode — summary stats only
+- **Not an interactive TUI or browser tool.** It is a non-interactive CLI — no live preview as you type. Pipe it, script it, run it in CI.
+- **Not a regex library.** It uses Node's built-in `RegExp` engine directly — the patterns and flags that work here are exactly what JavaScript supports.
+- **Not a linter or fixer.** It tells you what your pattern matches and how fast; it won't suggest a better pattern.
 
 ---
 
-## Requirements
-
-- Node.js 18+
-- Zero external dependencies
-
----
-
-## License
-
-MIT
+<div align="center">
+<sub>Zero dependencies · Node 18+ · MIT · by <a href="https://github.com/NickCirv">NickCirv</a></sub>
+</div>
