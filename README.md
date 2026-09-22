@@ -1,181 +1,86 @@
-![regex-tester — test, explain, and benchmark regular expressions from the terminal](assets/banner.png)
+![regex-tester — Nicholas Ashkar editorial artwork](assets/nicholas-ashkar/banner.png)
 
-<div align="center">
+# regex-tester
 
-**Test, match, explain, and benchmark regular expressions. Instant feedback in the terminal — no browser, no account, no install.**
+Test JavaScript regular expressions against strings, files or piped text.
 
-![license](https://img.shields.io/badge/license-MIT-blue?labelColor=0B0A09)
-![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?labelColor=0B0A09)
-![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen?labelColor=0B0A09)
-![modes](https://img.shields.io/badge/modes-match%20·%20explain%20·%20benchmark%20·%20replace-8B92F6?labelColor=0B0A09)
+Shows match positions and capture groups, supports replacement output and JSON, and includes a small pattern explainer and repeated-run timing mode.
 
-</div>
 
----
+<a id="install"></a>
 
-Regex tools live in a browser, expect you to paste one string at a time, and give you no way to pipe them into a build script. `regex-tester` runs entirely in the terminal: feed it strings, a file, or stdin — get back highlighted matches, exact capture group positions, a plain-English explanation of the pattern, and ops/second benchmarks. Scriptable via JSON output and exit codes.
+## Quickstart
 
-```
-$ rgxt "(\w+)@(\w+\.\w+)" "nick@example.com" "admin@cirvgreen.com"
-
-2 matches for /(\w+)@(\w+\.\w+)/g
-Input: "nick@example.com"
-  Match 1: "nick@example.com"
-    Position: 0..16  Length: 16
-    Capture groups:
-      Group 1: "nick"
-      Group 2: "example.com"
-
-Input: "admin@cirvgreen.com"
-  Match 1: "admin@cirvgreen.com"
-    Position: 0..19  Length: 19
-    Capture groups:
-      Group 1: "admin"
-      Group 2: "cirvgreen.com"
-
-Summary: 2 total matches across 2 inputs
-```
-
-## Install
-
-No npm account needed — runs straight from GitHub with zero dependencies:
+Package runtime requirement: Node.js `>=20`. Git is needed to obtain this pinned source checkout.
 
 ```bash
-npx github:NickCirv/regex-tester
+git clone https://github.com/NickCirv/regex-tester.git
+cd regex-tester
+git checkout 081200a54a83570536eb1cd4088cd7de4220a2d8
+node index.js '\d+' 'order 123' --count
 ```
 
-Or install the short alias globally:
+This source-derived example has not been executed in this review. For this illustrative input, the global pattern has one match. The expected count is derived from the pattern, not a captured run.
 
-```bash
-npx github:NickCirv/regex-tester --help
-# short alias after global install:
-# rgxt <pattern> [strings...]
-```
+
+
+
+
+
+
+
+
+<a id="what-it-does"></a>
+
+<a id="match-with-ansi-highlighting"></a>
+
+<a id="named-capture-groups"></a>
+
+<a id="explain-mode--plain-english-breakdown"></a>
+
+<a id="replace-mode"></a>
+
+<a id="file-and-stdin"></a>
+
+<a id="benchmark"></a>
+
+<a id="json-export"></a>
 
 ## Usage
 
-```
-regex-tester <pattern> [strings...] [options]
-rgxt         <pattern> [strings...] [options]
-```
-
-| Flag | Description |
-|------|-------------|
-| `--flags <gimsud>` | Regex flags: `g`=global `i`=ignoreCase `m`=multiline `s`=dotAll `u`=unicode (default: `g`) |
-| `--replace <str>` | Replace matches; supports `$1`, `$2`, `$<name>` back-references |
-| `--file <path>` | Test against each line of a file |
-| `--benchmark [n]` | Benchmark N iterations (default: 10 000) — reports ops/second and µs/op |
-| `--explain` | Describe the pattern token-by-token in plain English |
-| `--json` | Output results as JSON (scriptable) |
-| `--count` | Print only total match count |
-| `--no-color` | Disable ANSI output |
-| `--help` | Show help |
-
-## What it does
-
-### Match with ANSI highlighting
-
 ```bash
-rgxt "\d+" "abc123def456"
-# 2 matches for /\d+/g
-#   Match 1: "123"  Position: 3..6  Length: 3
-#   Match 2: "456"  Position: 9..12  Length: 3
+node index.js '(?<name>\w+)' 'hello world' --json
+node index.js '\d+' 'order 123' --replace '[number]'
+node index.js '^OK' --file lines.txt --flags gm
 ```
 
-### Named capture groups
+`--flags` defaults to global matching. `--explain` describes recognized syntax. `--benchmark [n]` repeats matching; `--count` prints only the count.
 
-```bash
-regex-tester "(?<user>\w+)@(?<domain>[\w.]+)" "nick@example.com"
-# Match 1: "nick@example.com"
-#   Named groups:
-#     user:   "nick"
-#     domain: "example.com"
-```
+[Command reference](docs/REFERENCE.md) covers arguments, modes and output controls.
 
-### Explain mode — plain-English breakdown
 
-```bash
-regex-tester "([\w.]+)@([\w.]+)" --explain
-# Pattern: /([\w.]+)@([\w.]+)/g
-# Explanation:
-#    1. [START of a capturing group]
-#    2. any character in [\w.] (1 or more times)
-#    3. [END of group]
-#    4. the literal character "@"
-#    5. [START of a capturing group]
-#    6. any character in [\w.] (1 or more times)
-#    7. [END of group]
-```
+<a id="what-it-is-not"></a>
 
-### Replace mode
+## Behavior and limits
 
-```bash
-regex-tester "(\w+)@(\w+\.\w+)" "contact user@example.com" --replace "[email redacted]"
-# Replaced: "contact [email redacted]"
-# (1 replacement)
-```
+The engine is Node’s JavaScript RegExp, not PCRE or another language’s regex dialect. Explanation is heuristic. Pathological patterns can take a long time; no isolation timeout is established. File mode tests lines separately, which differs from matching an entire file. No LICENSE file is captured despite MIT metadata.
 
-### File and stdin
+## Development
 
-```bash
-# Test each line of a file
-regex-tester "^\d{4}-\d{2}-\d{2}$" --file dates.txt --count
+Declared package scripts:
 
-# Pipe from any source
-cat urls.txt | rgxt "https?://[\w./]+"
-echo "foo bar baz" | rgxt "\b\w{3}\b"
-```
+| Script | Command |
+| --- | --- |
+| `test` | `node --test` |
 
-### Benchmark
+The smoke test syntax-checks the entrypoint; it does not exercise CLI behavior or integrations.
 
-```bash
-regex-tester "\b\w+\b" "the quick brown fox" --benchmark 100000
-# Benchmark  /\b\w+\b/g
-#   Iterations:    100,000
-#   Total time:    52.3ms
-#   Per iteration: 0.523μs
-#   Ops/second:    1,912,045
-```
+## Research
 
-### JSON export
+[Source review and claim ledger](docs/RESEARCH.md) records revision `081200a54a83`, inspected files and verification gaps.
 
-```bash
-regex-tester "(\w+)@(\w+)" "user@example.com" --json
-```
+## License and attribution
 
-```json
-{
-  "pattern": "(\\w+)@(\\w+)",
-  "flags": "g",
-  "totalInputs": 1,
-  "totalMatches": 1,
-  "results": [
-    {
-      "input": "user@example.com",
-      "matchCount": 1,
-      "matches": [
-        {
-          "match": "user@example",
-          "start": 0,
-          "end": 12,
-          "length": 12,
-          "groups": { "1": "user", "2": "example" },
-          "namedGroups": {}
-        }
-      ]
-    }
-  ]
-}
-```
+No license file was captured at this revision. A package metadata license field does not supply missing license text; confirm reuse terms before redistribution.
 
-## What it is NOT
-
-- **Not an interactive TUI or browser tool.** It is a non-interactive CLI — no live preview as you type. Pipe it, script it, run it in CI.
-- **Not a regex library.** It uses Node's built-in `RegExp` engine directly — the patterns and flags that work here are exactly what JavaScript supports.
-- **Not a linter or fixer.** It tells you what your pattern matches and how fast; it won't suggest a better pattern.
-
----
-
-<div align="center">
-<sub>Zero dependencies · Node 18+ · MIT · by <a href="https://github.com/NickCirv">NickCirv</a></sub>
-</div>
+[Artwork credits](assets/nicholas-ashkar/CREDITS.md) · [Nicholas Ashkar — consulting](https://nicholashkar.com/#oxblood-contact)
